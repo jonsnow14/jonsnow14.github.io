@@ -1,6 +1,7 @@
 title: jonsnow14's Blog
 description: Technical deep-dives on AI, CLI tools, and software engineering.
 url: "https://jonsnow14.github.io"
+baseurl: "/https-jonsnow14.github.io"
 theme: minima
 
 minima:
