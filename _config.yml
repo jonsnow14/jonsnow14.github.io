@@ -1,0 +1,16 @@
+title: jonsnow14's Blog
+description: Technical deep-dives on AI, CLI tools, and software engineering.
+url: "https://jonsnow14.github.io"
+theme: minima
+
+minima:
+  skin: dark
+
+author:
+  name: jonsnow14
+
+show_excerpts: true
+
+plugins:
+  - jekyll-feed
+  - jekyll-seo-tag
