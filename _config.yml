@@ -4,9 +4,6 @@ url: "https://jonsnow14.github.io"
 baseurl: "/https-jonsnow14.github.io"
 theme: minima
 
-minima:
-  skin: dark
-
 author: jonsnow14
 
 future: true

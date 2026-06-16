@@ -1,0 +1,92 @@
+---
+---
+
+@import "minima";
+
+/* Dark theme overrides */
+
+body {
+  background-color: #1a1a2e;
+  color: #e0e0e0;
+}
+
+a {
+  color: #7eb8f7;
+}
+
+a:visited {
+  color: #a78bfa;
+}
+
+a:hover {
+  color: #ffffff;
+}
+
+.site-header {
+  background-color: #16213e;
+  border-top: 5px solid #7eb8f7;
+  border-bottom: 1px solid #2a2a4a;
+}
+
+.site-title,
+.site-title:visited {
+  color: #e0e0e0;
+}
+
+.site-nav .page-link {
+  color: #e0e0e0;
+}
+
+.site-footer {
+  background-color: #16213e;
+  border-top: 1px solid #2a2a4a;
+  color: #a0a0a0;
+}
+
+.footer-col {
+  color: #a0a0a0;
+}
+
+.post-link {
+  color: #7eb8f7;
+}
+
+.post-meta {
+  color: #a0a0a0;
+}
+
+.post-content h1,
+.post-content h2,
+.post-content h3,
+.post-content h4 {
+  color: #ffffff;
+}
+
+pre,
+code {
+  background-color: #0f3460;
+  color: #e0e0e0;
+  border: 1px solid #2a2a4a;
+}
+
+blockquote {
+  color: #a0a0a0;
+  border-left: 4px solid #7eb8f7;
+}
+
+table th {
+  background-color: #16213e;
+  color: #7eb8f7;
+}
+
+table td {
+  border-color: #2a2a4a;
+}
+
+table tr:nth-child(even) {
+  background-color: #16213e;
+}
+
+hr {
+  border-color: #2a2a4a;
+}
