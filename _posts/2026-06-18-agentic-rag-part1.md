@@ -7,6 +7,10 @@ categories: [AI, RAG, Agents, Deep-Dive]
 
 *From single-pass retrieval to self-correcting agents — how RAG grows a brain.*
 
+Retrieval-Augmented Generation (RAG) was a meaningful step forward: instead of asking a language model to answer from memory, you give it relevant documents at query time. But standard RAG is a fixed pipeline — it retrieves once, builds a prompt, and generates an answer. It has no way to check whether what it retrieved was any good.
+
+Agentic RAG fixes that by wrapping retrieval inside a decision loop. The model can retrieve multiple times, grade its own results, rewrite bad queries, and fall back to the web — all before committing to an answer. This post explains how that works, what the core patterns are, and when it's worth the added complexity.
+
 ---
 
 ## 1. Quick Recap: What Plain RAG Does
@@ -35,7 +39,7 @@ For simple factual queries, this works well. For anything complex — multi-part
 
 ## 2. What Agentic RAG Is
 
-Agentic RAG wraps the RAG pipeline inside an **agent loop**. Instead of a fixed sequence, the model becomes a decision-maker:
+Agentic RAG wraps the RAG pipeline inside an **agent loop** — a cycle where the model reasons about what action to take, executes it, observes the result, and decides what to do next. Instead of a fixed sequence, the model becomes a decision-maker:
 
 ```
 User question
@@ -61,7 +65,7 @@ The model decides **when** to retrieve, **what** to retrieve, **whether the resu
 
 ## 3. Why the Agent Loop Changes Everything
 
-In a standard agent (think ReAct), the model alternates between reasoning and acting:
+In a standard agent (think **ReAct** — short for *Reasoning + Acting*, a prompting pattern where the model explicitly traces its thoughts before each action), the model alternates between reasoning and acting:
 
 ```
 Thought: I need to find information about X.
@@ -169,6 +173,8 @@ Rewritten query: "authentication system decision records"
 
 Rewriting can happen once upfront or iteratively — if retrieval still fails after one rewrite, the agent rewrites again with a different strategy.
 
+A related approach is **FLARE** (Forward-Looking Active Retrieval, Jiang et al. 2023), which takes this further: the model generates a tentative next sentence, and if it's uncertain about a claim in that sentence, it triggers a retrieval before committing the output. Rather than rewriting the user's question, FLARE rewrites its own uncertain predictions into retrieval queries mid-generation.
+
 ---
 
 ### Pattern 4: Self-RAG — Retrieve, Reflect, Critique
@@ -267,6 +273,7 @@ The most common implementation pattern today uses **LangGraph** — a framework 
 Each node is a function (retrieve, grade, rewrite, generate). Each edge is a condition (if grade is IRRELEVANT, go to web_search; otherwise go to generate).
 
 ```python
+# Abbreviated sketch — full working implementation in Part II
 from langgraph.graph import StateGraph
 
 graph = StateGraph(AgentState)
@@ -319,6 +326,7 @@ Start simple. Add agentic components only where a specific failure mode demands 
 | Routing | Classify query complexity; skip retrieval for simple questions |
 | Retrieval grading | Score chunks for relevance before passing to LLM |
 | Query rewriting | Rewrite user question into a better retrieval query |
+| FLARE | Model rewrites its own uncertain predictions into retrieval queries mid-generation |
 | Self-RAG | Model emits reflection tokens to grade its own outputs mid-generation |
 | Multi-hop | Chain retrievals — each step informs the next query |
 | LangGraph | Graph-based framework for implementing these patterns |
