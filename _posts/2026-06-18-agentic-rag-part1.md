@@ -1,6 +1,6 @@
 ---
 layout: post
-title: "Agentic RAG: Part I"
+title: "How Agentic RAG Works: Part I"
 date: 2026-06-18
 categories: [AI, RAG, Agents, Deep-Dive]
 ---
