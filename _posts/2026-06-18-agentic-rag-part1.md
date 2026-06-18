@@ -338,6 +338,13 @@ Agentic RAG closes the gap between what a language model knows and what it can r
 | Adaptive-RAG | Jeong et al., 2024 | [arxiv.org/abs/2403.14403](https://arxiv.org/abs/2403.14403) |
 
 
+### Lecture Playlists
+
+| Playlist | Source |
+|---|---|
+| [Stanford CME295: Transformers and Large Language Models](https://www.youtube.com/watch?v=Ub3GoFaUcds&list=PLoROMvodv4rOCXd21gf0CF4xr35yINeOy) | Stanford / YouTube |
+| [Large Language Models (LLMs)](https://www.youtube.com/watch?v=oyLUvz9nR6E&list=PLoROMvodv4rObv1FMizXqumgVVdzX4_05) | YouTube |
+
 ### Repositories
 
 | Repository | Purpose |
