@@ -337,14 +337,6 @@ Agentic RAG closes the gap between what a language model knows and what it can r
 | Corrective Retrieval Augmented Generation (CRAG) | Yan et al., 2024 | [arxiv.org/abs/2401.15884](https://arxiv.org/abs/2401.15884) |
 | Adaptive-RAG | Jeong et al., 2024 | [arxiv.org/abs/2403.14403](https://arxiv.org/abs/2403.14403) |
 
-### Blog Posts
-
-| Post | Source |
-|---|---|
-| [LLM Powered Autonomous Agents](https://lilianweng.github.io/posts/2023-06-23-agent/) | Lilian Weng |
-| [Agentic RAG with LlamaIndex](https://www.llamaindex.ai/blog/agentic-rag-with-llamaindex) | LlamaIndex Blog |
-| [Agentic RAG with LangGraph](https://blog.langchain.dev/agentic-rag-with-langgraph/) | LangChain Blog |
-| [RAG from Scratch](https://blog.langchain.dev/rag-from-scratch/) | LangChain Blog |
 
 ### Repositories
 
