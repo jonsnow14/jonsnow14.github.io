@@ -5,7 +5,7 @@ date: 2026-10-31
 categories: [AI, Transformers, Deep-Dive]
 ---
 
-*A language-model Transformer, from tokens to the next-word prediction: the stack of blocks, causal self-attention, the feed-forward layer that widens a token and writes a small update back, and the softmax that turns the final vector into probabilities.*
+*A language-model Transformer, from tokens to the next-word prediction: the stack of blocks, causal self-attention, the feed-forward layer that widens a token and writes a small update back, the residual add and the norm, and the softmax that turns the final vector into probabilities.*
 
 ---
 
@@ -518,13 +518,102 @@ During training, every position has its own row of probabilities. The loss is th
 loss = −log(0.245) ≈ 1.41
 ```
 
-A higher probability on the true word makes this number smaller, which is what the gradient steps in section 10 are chasing.
+A higher probability on the true word makes this number smaller, which is what the gradient steps in section 11 are chasing.
 
 The softmax inside attention is a different distribution. There, each row is a mix over earlier positions in the sequence, and it is used to combine value vectors. The softmax here is a mix over the vocabulary, and it is the model's prediction of the next word.
 
 ---
 
-## 10. Where the weight values come from
+## 10. How the residual add and the norm are decided
+
+The residual add and the norm are fixed formulas. Training does not choose whether to add, or how the rescaling is computed. It only learns a scale vector inside the norm. Both formulas work element by element, so the width stays `d_model`.
+
+### The residual add
+
+The add is elementwise. The vector that skipped around the feed-forward network is added to the update that came out of `W2`:
+
+```
+x_new = x + update
+[0.4, 1.0] + [0.5, 0.4] = [0.9, 1.4]
+```
+
+Nothing is learned in that line. There is no weight matrix on the add. The block is built so the sublayer output has the same width as `x`, and those two vectors are summed. The same add happens after attention, with that sublayer's own update:
+
+```
+x  =  x + attention update
+x  =  x + feed-forward update      ← the [0.9, 1.4] step
+```
+
+Each later block repeats those two adds with its own updates. The running vector is whatever the previous add produced.
+
+In the block, the feed-forward network reads the normalized `x`. The skip still carries the raw `x`:
+
+```
+x ─────────────────────────────┐
+│                              │
+▼                              │
+Norm                           │  this is the vector W1 actually sees
+│                              │
+W1 → σ → W2 → update           │
+│                              │
+▼                              │
+x + update  ◄──────────────────┘
+```
+
+The worked `W1` / `W2` numbers in section 8 were applied straight to `[0.4, 1.0]` so the multiply stayed easy to check. In the block, that multiply runs on `Norm(x)`, and `[0.4, 1.0]` is the vector added back afterward.
+
+### The norm
+
+The norm recomputes a scale from the current vector, then multiplies by a learned vector `γ` of width `d_model`. `γ` starts as all ones and moves during training the same way `W1` and `W2` do. The rescaling rule itself is part of the architecture.
+
+Most current models use RMSNorm. For `x = [0.9, 1.4]` after the add, with `γ = [1, 1]`:
+
+```
+RMS = sqrt( (0.9² + 1.4²) / 2 ) = sqrt(1.385) = 1.177
+
+h = γ ⊙ x / RMS
+  = [0.9 / 1.177,  1.4 / 1.177]
+  = [0.765,  1.190]
+```
+
+A tiny constant `ε` is added inside the square root so a zero vector is never divided by zero. The designer picks `ε`, often `10⁻⁵` or `10⁻⁶`. It is not trained.
+
+LayerNorm, the older choice, also subtracts the mean and has a second learned vector `β` added at the end:
+
+```
+mean = (0.9 + 1.4) / 2 = 1.15
+std  = 0.25
+(x − mean) / std = [−1,  1]
+
+h = γ ⊙ (x − mean) / std + β
+```
+
+With `γ = [1, 1]` and `β = [0, 0]`, that `h` is `[−1, 1]`. Dropping `β` is the same kind of choice as dropping `b1` and `b2`.
+
+Each block owns its own `γ`. Block 3 does not reuse block 1's scale. The formula is identical in every block.
+
+### Where `h` comes from
+
+The final norm is one extra RMSNorm, or LayerNorm, after the last block, with its own `γ`. There is no residual wrapped around it. Its output is `h`, still width `d_model`, and that is the vector multiplied by `W_U`:
+
+```
+[0.9, 1.4]     last residual add
+     │
+     ▼
+ final norm    h = γ ⊙ x / RMS(x)     →  [0.765, 1.190] when γ is all ones
+     │
+     ▼
+ h W_U         logits, one score per vocabulary word
+     │
+     ▼
+ softmax
+```
+
+A plain sum produces the next residual stream. Every block, and the final layer, rescale that stream with the norm formula. Only `γ` inside each norm is a learned parameter.
+
+---
+
+## 11. Where the weight values come from
 
 The entries of `W1` and of `W2` are stored parameters. Training writes them, over the whole corpus, before any new token is seen. A forward pass reads the matrices. It does not invent their entries from the current token.
 
@@ -547,7 +636,7 @@ The same update hits every entry of `W1` and every entry of `W2`. A column of `W
 
 ---
 
-## 11. How the shapes are decided
+## 12. How the shapes are decided
 
 Two numbers fix both shapes. The model designer picks them before training, as part of the architecture. Training fills the entries. It never changes the shapes.
 
@@ -596,20 +685,20 @@ A longer sentence does not change `W1` or `W2`. For `T` tokens, `a` is `T × d_f
 
 ---
 
-## 12. One token walking through
+## 13. One token walking through
 
 Start with `sat` in `the cat sat`.
 
 1. Embedding turns `sat` into a vector. Position information says it is the third token.
 2. In block 1, its query is compared with the keys of `the`, `cat`, and `sat`. The causal mask hides anything after `sat`. Softmax picks a mix of those three value vectors. The feed-forward network then scores its detectors with `W1`, keeps the ones that fire, and uses `W2` to write an update of width `d_model` back onto the token.
 3. Blocks 2 through `N` repeat the edit. Later blocks read representations that earlier blocks have already filled with context.
-4. The final norm and the unembed matrix turn the last vector into one score per vocabulary word. Softmax turns those scores into probabilities that sum to 1, as in the worked example of section 9, and the model samples the next word from that distribution.
+4. The final norm rescales that vector, as in section 10, and the unembed matrix turns it into one score per vocabulary word. Softmax turns those scores into probabilities that sum to 1, as in the worked example of section 9, and the model samples the next word from that distribution.
 
 Stacking the blocks is the whole working of the model. Attention moves information between tokens. The feed-forward network updates each token. The residual path carries the running representation up to the next-token prediction.
 
 ---
 
-## 13. Why the bias terms go away
+## 14. Why the bias terms go away
 
 The original layer adds a bias after each multiply: `b1` in the wide space, `b2` in the stream. Current models leave both out. Two reasons, the same idea as the move from LayerNorm to RMSNorm.
 
