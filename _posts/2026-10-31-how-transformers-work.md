@@ -5,7 +5,7 @@ date: 2026-10-31
 categories: [AI, Transformers, Deep-Dive]
 ---
 
-*A language-model Transformer, from tokens to the next-word prediction: the stack of blocks, causal self-attention, the feed-forward layer that widens a token and writes a small update back, the residual add and the norm, and the softmax that turns the final vector into probabilities.*
+*How a Transformer moves a token from text to the next-word probabilities, and how those same blocks sit in an encoder–decoder pass: the source is read by the encoder alone, and the target prefix, including the fixed `<bos>` id, meets the encoder memory only at the decoder.*
 
 ---
 
@@ -694,7 +694,7 @@ Start with `sat` in `the cat sat`.
 3. Blocks 2 through `N` repeat the edit. Later blocks read representations that earlier blocks have already filled with context.
 4. The final norm rescales that vector, as in section 10, and the unembed matrix turns it into one score per vocabulary word. Softmax turns those scores into probabilities that sum to 1, as in the worked example of section 9, and the model samples the next word from that distribution.
 
-Stacking the blocks is the whole working of the model. Attention moves information between tokens. The feed-forward network updates each token. The residual path carries the running representation up to the next-token prediction.
+Stacking these blocks is the language-model path: attention moves information between tokens, the feed-forward network updates each token, and the residual path carries the representation up to the next-token prediction. Section 15 uses the same units in an encoder–decoder pass, where a source sentence and a target prefix are separate inputs.
 
 ---
 
@@ -705,3 +705,160 @@ The original layer adds a bias after each multiply: `b1` in the wide space, `b2`
 **Memory.** A bias is one extra vector per linear layer (`d_ff` for `b1`, `d_model` for `b2`), stored and added on every forward and backward pass. Next to `W1` and `W2` the count is small, but the choice is repeated in every block, and the same choice is usually applied to the attention projections and to the norm. RMSNorm makes the matching cut inside the norm: LayerNorm has a learned scale and a learned shift, and RMSNorm keeps the scale and drops the shift. Both moves delete an additive offset the model can do without.
 
 **Optimization stability.** At large scale, training is steadier without those offsets. A bias right before a norm is partly redundant, because the norm recenters or rescales the vector and can relearn a shift with its own parameters. Biases on the output side also sit on the residual stream, where a constant push can fight the norm and the residual add. Large models trained this way keep quality while the run stays more stable.
+
+---
+
+## 15. Encoder and decoder
+
+A language model is a stack of decoder blocks with no encoder beside it. A translation model has both. The source sentence is read by the encoder alone. The translation written so far is a second input that meets the encoder’s memory only at the decoder.
+
+This pass uses source `the cat sat` and target prefix `<bos> le`, with `d_model = 4`, 2 heads so `d_k = 2`, and `d_ff = 8`. The attention, feed-forward, residual add, and norm inside each box are the units from sections 4 through 10.
+
+```
+SOURCE  (the sentence being read)          TARGET PREFIX  (the translation so far)
+"the cat sat"                               "<bos>  le"
+      │                                          │
+      │  the, cat, sat are the source words      │  <bos> = fixed start id, inserted by the program
+      ▼                                          │  le    = first target word, already chosen
+ids [12, 47, 9]                                  ▼
+      │                                     ids [1, 88]
+      ▼                                          │
+source vectors  3 × 4                            ▼
+      │                                     target vectors  2 × 4
+      ▼                                          │
+┌─────────────┐                                  │
+│   ENCODER   │  one input only                  │
+│  attention  │                                  │
+│  then FFN   │                                  │
+└─────────────┘                                  │
+      │                                          │
+      ▼                                          │
+memory M  3 × 4                                  │
+one row for the, cat, sat                        │
+      │                                          │
+      │         both arrive together             │
+      └──────────────┐    ┌──────────────────────┘
+                     ▼    ▼
+              ┌─────────────────┐
+              │     DECODER     │  two inputs at once
+              │ self-attention  │  • M, the source memory
+              │ cross-attention │  • <bos> le, the target so far
+              │ then FFN        │
+              └─────────────────┘
+                     │
+                     ▼
+              decoder output  2 × 4
+              row 0 = <bos>,  row 1 = le
+                     │
+                     ▼
+              the row for le becomes probabilities
+              for the next target word, e.g. chat
+```
+
+### The two inputs
+
+The source is the sentence the encoder reads: `the`, `cat`, and `sat`. Each word becomes one row of width 4. The encoder rewrites those three rows and leaves memory `M`, still `3 × 4`. Row 0 remains `the`, row 1 `cat`, row 2 `sat`.
+
+The target prefix is the translation so far. It is not an input to the encoder.
+
+* `<bos>` means beginning of sequence. It is a reserved vocabulary slot, chosen once when the tokenizer is built. In this example that slot is id `1`. Any other unused integer would have worked. After the choice, `1` always means “start” and is never reassigned per sentence. The program inserts it: the training loader writes id `1` in front of each reference translation, and the generator writes id `1` as the first decoder input before any word exists. The model is not asked to predict `<bos>`. Training learns only the embedding row for id `1`. That row starts random, like the row for `le`, and gradient updates move its `d_model` numbers.
+* `le` is a real target word already chosen. During generation, the previous pass produced it. During training, it is copied from the reference translation. Its id, `88`, is the ordinary vocabulary id for that word, and its embedding row is learned the same way.
+
+`<bos>` and `le` are embedded on their own into a `2 × 4` matrix. That work can happen while the encoder is still running, because it does not use the source. The decoder block is the first place the two streams meet, and it runs only once `M` exists. Later target words do not cause another encoder pass. `M` stays fixed.
+
+Generation builds the prefix one word at a time. The first input contains only the fixed start id:
+
+```
+pass 1 input:   <bos>                  output word: le
+pass 2 input:   <bos>  le              output word: chat
+pass 3 input:   <bos>  le  chat        output word: ...
+```
+
+The diagram is pass 2. Id `1` was inserted by the program. Id `88` (`le`) is the word pass 1 already produced.
+
+### Tokenization and embedding
+
+| Step | Enters | Leaves |
+|---|---|---|
+| Source tokenizer | `the cat sat` | ids `[12, 47, 9]` |
+| Target tokenizer | `<bos> le` | ids `[1, 88]`. Id `1` is the reserved start slot, not a word looked up from the sentence |
+| Source embedding | those 3 ids | source vectors, `3 × 4`. Each row is a trained vector |
+| Target embedding | those 2 ids | target vectors, `2 × 4`. The row for id `1` is the trained `<bos>` vector |
+| Position | each row | the same shapes. A position vector is added here, or rotary position is applied later inside attention |
+
+### Encoder block
+
+One input, `X`, shape `3 × 4`. One output, memory `M`, shape `3 × 4`. Attention runs first, then the feed-forward block. A stack of encoder blocks repeats these units. The shapes stay the same.
+
+Self-attention here lets every source token read every source token.
+
+| Unit | Enters | Leaves |
+|---|---|---|
+| Norm | `X`, `3 × 4` | rescaled `X`, `3 × 4`. The skip keeps the original `X` |
+| `Wq`, `Wk`, `Wv` | `3 × 4` | `Q`, `K`, `V`, each `3 × 4`, split into 2 heads of `3 × 2` |
+| Scores | `Q` and `K` per head | `3 × 3`. Entry `(i, j)` is how much source token `i` wants source token `j` |
+| Mask | `3 × 3` | `3 × 3`. No future token is hidden. A padding position, if the batch has one, is set to −∞ |
+| Softmax | `3 × 3` | `3 × 3`. Each row sums to 1 |
+| Value mix | weights `3 × 3` and `V` `3 × 2` | `3 × 2` per head. Each source token is a mix of all three value rows |
+| Concatenate and `Wo` | two heads | one update, `3 × 4` |
+| Dropout | `3 × 4` | `3 × 4`, with random zeros during training |
+| Residual add | original `X` plus the update | new `X`, `3 × 4` |
+
+The feed-forward sublayer then updates each source token on its own.
+
+| Unit | Enters | Leaves |
+|---|---|---|
+| Norm | `X`, `3 × 4` | `3 × 4`. The skip keeps the pre-norm `X` |
+| `W1` | `3 × 4` | detector scores `3 × 8` |
+| `σ` | `3 × 8` | `3 × 8`. Negative scores become 0 |
+| `W2` | `3 × 8` | update `3 × 4` |
+| Dropout | `3 × 4` | `3 × 4` |
+| Residual add | pre-norm `X` plus the update | `M`, `3 × 4` |
+
+`M` leaves the encoder and is held for every decoder pass.
+
+### Decoder block
+
+Two inputs arrive together: memory `M` at `3 × 4`, and target vectors `Y` at `2 × 4`. Three sublayers run in order. The output is still `2 × 4`.
+
+Causal self-attention lets the target tokens read each other. `M` is not used in this sublayer.
+
+| Unit | Enters | Leaves |
+|---|---|---|
+| Norm | `Y`, `2 × 4` | `2 × 4` |
+| `Wq`, `Wk`, `Wv` | `2 × 4` | `Q`, `K`, `V` as 2 heads of `2 × 2`. These weights belong to the decoder |
+| Scores | `Q`, `K` | `2 × 2` |
+| Causal mask | `2 × 2` | `2 × 2`. `<bos>` can read only itself. `le` can read `<bos>` and `le`. The other entry is −∞ |
+| Softmax | masked scores | `2 × 2`, rows sum to 1 |
+| Value mix, `Wo`, dropout | head values | update `2 × 4` |
+| Residual add | original `Y` plus the update | `Y`, `2 × 4` |
+
+Cross-attention is the unit that reads the encoder. Queries come from the decoder. Keys and values come from `M`.
+
+| Unit | Enters | Leaves |
+|---|---|---|
+| Norm | decoder `Y`, `2 × 4` | `2 × 4` |
+| `Wq` | decoder `2 × 4` | `Q`, heads of `2 × 2` |
+| `Wk`, `Wv` | memory `M`, `3 × 4` | `K` and `V`, heads of `3 × 2` |
+| Scores | `Q` and `K` | `2 × 3`. Each target token has one score for `the`, `cat`, and `sat` |
+| Mask | `2 × 3` | `2 × 3`. All source positions stay visible |
+| Softmax | `2 × 3` | `2 × 3`, each target row sums to 1 |
+| Value mix | weights `2 × 3` and encoder `V` `3 × 2` | `2 × 2` per head. `le` is a mix of the three source values |
+| `Wo`, dropout | concatenated heads | update `2 × 4` |
+| Residual add | decoder `Y` plus the update | `Y`, `2 × 4` |
+
+The feed-forward sublayer uses the same units as the encoder’s, with the decoder’s own `W1`, `W2`, and norm scale.
+
+| Unit | Enters | Leaves |
+|---|---|---|
+| Norm | `Y`, `2 × 4` | `2 × 4` |
+| `W1` | `2 × 4` | `2 × 8` |
+| `σ` | `2 × 8` | `2 × 8` |
+| `W2` | `2 × 8` | `2 × 4` |
+| Dropout and residual add | the update plus the pre-norm `Y` | decoder output, `2 × 4` |
+
+### What leaves the decoder
+
+The block’s output is `2 × 4`. Row 0 belongs to `<bos>`, the trained vector for the fixed id `1`, rewritten by the block. Row 1 belongs to `le`. The next decoder block, if there is one, takes this matrix as its new `Y` and reads the same `M`.
+
+After the last decoder block, the row for `le` is normalized and multiplied by the unembed matrix, as in section 9. That produces one score per vocabulary word. Softmax turns the scores into probabilities, and the program picks the next target word, such as `chat`. The following pass feeds `<bos> le chat` into the decoder with the same memory `M`. The start id is still `1`.
