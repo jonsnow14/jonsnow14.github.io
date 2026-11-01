@@ -9,6 +9,23 @@ categories: [AI, Transformers, Deep-Dive]
 
 ---
 
+## Contents
+
+A token moves in this order. Each step says what enters and what leaves. The later sections are the workings of those steps.
+
+1. **Source tokenization.** The text `the cat sat` enters. The tokenizer leaves integer ids, one per word, `[12, 47, 9]`. [Section 15](#15-encoder-and-decoder).
+2. **Target prefix and `<bos>`.** The target side starts as its own input. `<bos>` is vocabulary id `1`, chosen once when the tokenizer is built and inserted by the program. It is not predicted. `le` is a target word already chosen, id `88`. The two ids `[1, 88]` leave this step. Training learns only the embedding row for id `1`. [The two inputs](#the-two-inputs).
+3. **Embeddings.** Each id enters an embedding table and leaves as a row of width `d_model`. The source matrix is `3 × 4`. The target matrix is `2 × 4`. Those rows are trained vectors. [Tokenization and embedding](#tokenization-and-embedding).
+4. **Position.** The same rows enter. Order is mixed in, either by adding a position vector or later by rotary position on queries and keys. The shapes do not change. [Where order comes from](#3-where-order-comes-from).
+5. **Encoder self-attention.** Source vectors `3 × 4` enter. A norm rescales them. `Wq`, `Wk`, and `Wv` make queries, keys, and values. Scores are a `3 × 3` matrix, softmax turns each row into weights, and the value mix lets every source token read the whole source. `Wo`, dropout, and the residual add leave a new `3 × 4` stream. [Causal self-attention](#5-causal-self-attention) explains the units. The encoder uses them with no future mask. [Encoder block](#encoder-block).
+6. **Encoder feed-forward, then memory `M`.** The `3 × 4` stream enters a norm. `W1` widens each row to `d_ff` detector scores, `σ` zeroes the negative scores, and `W2` shrinks the survivors back to `d_model`. The residual add leaves memory `M`, still `3 × 4`, one row for `the`, `cat`, and `sat`. [Feed-forward network](#6-the-feed-forward-network), [worked example](#8-a-worked-example), [residual and norm](#10-how-the-residual-add-and-the-norm-are-decided).
+7. **Decoder causal self-attention.** Target vectors `2 × 4` enter. The same attention units run with the decoder’s own weights. The causal mask lets `<bos>` read only itself and lets `le` read `<bos>` and `le`. `M` does not enter this sublayer. A `2 × 4` stream leaves. [Decoder block](#decoder-block).
+8. **Decoder cross-attention.** The decoder stream and memory `M` enter together. Queries come from the target rows. Keys and values come from `M`. Scores are `2 × 3`, one weight for `the`, `cat`, and `sat`. The value mix and `Wo` leave an update of shape `2 × 4`, added back onto the target stream. [Decoder block](#decoder-block).
+9. **Decoder feed-forward.** The target stream `2 × 4` enters the decoder’s own `W1`, `σ`, and `W2`. The residual add leaves the decoder output, still `2 × 4`. Row 0 belongs to `<bos>`. Row 1 belongs to `le`. [What leaves the decoder](#what-leaves-the-decoder).
+10. **Output.** The row for `le` enters the final norm, then the unembed matrix. Logits leave, one score per vocabulary word. Softmax turns them into probabilities, and the program picks the next target word, such as `chat`. The next pass enters the decoder as `<bos> le chat` with the same memory `M`. [After W2, through softmax](#9-after-w2-from-an-update-vector-to-probabilities).
+
+---
+
 ## 1. The job of the model
 
 A language-model Transformer reads a sequence of tokens and predicts what comes next. The sentence `the cat sat` goes in. A probability for every word in the vocabulary comes out, and a word is drawn from that distribution.
